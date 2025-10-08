@@ -53,7 +53,8 @@ def fetch_articles(issn: str, keyword: str, from_date: datetime, max_results: in
     response = requests.get(API_URL, params=params, timeout=30)
     response.raise_for_status()
     items = response.json().get("message", {}).get("items", [])
-    return [normalize_article(item) for item in items]
+    filtered = [item for item in items if contains_keyword(item, keyword)]
+    return [normalize_article(item) for item in filtered]
 
 
 def normalize_article(item: Dict) -> Article:
@@ -89,5 +90,22 @@ def parse_date(item: Dict) -> str:
     month = parts[1] if len(parts) > 1 else 1
     day = parts[2] if len(parts) > 2 else 1
     return datetime(year, month, day).strftime("%Y-%m-%d")
+
+
+def contains_keyword(item: Dict, keyword: str) -> bool:
+    if not keyword:
+        return True
+
+    keyword_lower = keyword.lower()
+
+    title = item.get("title", [""])[0].lower()
+    if keyword_lower in title:
+        return True
+
+    subjects = [subject.lower() for subject in item.get("subject", [])]
+    if any(keyword_lower in subject for subject in subjects):
+        return True
+
+    return False
 
 

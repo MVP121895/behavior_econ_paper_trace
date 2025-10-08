@@ -7,9 +7,10 @@ from datetime import datetime
 from typing import Dict, List
 
 import requests
+from dateutil import parser as date_parser
 from dateutil.relativedelta import relativedelta
 
-API_URL = "https://api.openalex.org/works"
+API_URL = "https://api.crossref.org/works"
 
 
 @dataclass
@@ -21,7 +22,6 @@ class Article:
     published_date: str
     abstract: str
     url: str
-    concepts: List[str]
 
 
 def default_from_date(years: int = 10) -> datetime:
@@ -30,15 +30,16 @@ def default_from_date(years: int = 10) -> datetime:
 
 def build_query_params(issn: str, keyword: str, from_date: datetime, max_results: int, mailto: str | None = None) -> Dict[str, str]:
     filters = [
-        f"host_venue.issn:{issn}",
-        f"from_publication_date:{from_date.strftime('%Y-%m-%d')}",
+        f"from-pub-date:{from_date.strftime('%Y-%m-%d')}",
+        f"issn:{issn}",
     ]
 
     params: Dict[str, str] = {
+        "query": keyword,
         "filter": ",".join(filters),
-        "search": keyword,
-        "sort": "publication_date:desc",
-        "per-page": str(max_results),
+        "rows": str(max_results),
+        "sort": "published",
+        "order": "desc",
     }
 
     if mailto:
@@ -51,27 +52,22 @@ def fetch_articles(issn: str, keyword: str, from_date: datetime, max_results: in
     params = build_query_params(issn=issn, keyword=keyword, from_date=from_date, max_results=max_results, mailto=mailto)
     response = requests.get(API_URL, params=params, timeout=30)
     response.raise_for_status()
-    items = response.json().get("results", [])
+    items = response.json().get("message", {}).get("items", [])
     filtered = [item for item in items if contains_keyword(item, keyword)]
     return [normalize_article(item) for item in filtered]
 
 
 def normalize_article(item: Dict) -> Article:
-    title = item.get("display_name", "")
-
-    authors: List[str] = []
-    for authorship in item.get("authorships", []) or []:
-        author_info = authorship.get("author") or {}
-        name = author_info.get("display_name")
-        if name:
-            authors.append(name)
-
-    doi = (item.get("doi") or "").removeprefix("https://doi.org/")
-    journal = item.get("host_venue", {}).get("display_name", "")
-    abstract = extract_abstract(item)
+    title = item.get("title", [""])[0]
+    authors = [
+        " ".join(filter(None, [person.get("given"), person.get("family")]))
+        for person in item.get("author", [])
+    ]
+    doi = item.get("DOI", "")
+    journal = item.get("container-title", [""])[0]
+    abstract = item.get("abstract", "")
+    url = f"https://doi.org/{doi}" if doi else ""
     published_date = parse_date(item)
-    url = item.get("primary_location", {}).get("landing_page_url") or item.get("host_venue", {}).get("url") or (f"https://doi.org/{doi}" if doi else "")
-    concepts = [concept.get("display_name", "") for concept in item.get("concepts", [])]
 
     return Article(
         title=title,
@@ -81,20 +77,19 @@ def normalize_article(item: Dict) -> Article:
         published_date=published_date,
         abstract=abstract,
         url=url,
-        concepts=concepts,
     )
 
 
 def parse_date(item: Dict) -> str:
-    raw_date = item.get("publication_date")
-    if raw_date:
-        return raw_date
+    date_parts = item.get("issued", {}).get("date-parts")
+    if not date_parts:
+        return ""
 
-    year = item.get("publication_year")
-    if year:
-        return f"{year}-01-01"
-
-    return ""
+    parts = date_parts[0]
+    year = parts[0]
+    month = parts[1] if len(parts) > 1 else 1
+    day = parts[2] if len(parts) > 2 else 1
+    return datetime(year, month, day).strftime("%Y-%m-%d")
 
 
 def contains_keyword(item: Dict, keyword: str) -> bool:
@@ -103,31 +98,14 @@ def contains_keyword(item: Dict, keyword: str) -> bool:
 
     keyword_lower = keyword.lower()
 
-    title = item.get("display_name", "").lower()
+    title = item.get("title", [""])[0].lower()
     if keyword_lower in title:
         return True
 
-    abstract = extract_abstract(item).lower()
-    if keyword_lower in abstract:
-        return True
-
-    concepts = [concept.get("display_name", "").lower() for concept in item.get("concepts", [])]
-    if any(keyword_lower in concept for concept in concepts):
+    subjects = [subject.lower() for subject in item.get("subject", [])]
+    if any(keyword_lower in subject for subject in subjects):
         return True
 
     return False
-
-
-def extract_abstract(item: Dict) -> str:
-    inverted = item.get("abstract_inverted_index")
-    if not inverted:
-        return item.get("abstract", "") or ""
-
-    index_to_word: Dict[int, str] = {}
-    for word, positions in inverted.items():
-        for pos in positions:
-            index_to_word[pos] = word
-
-    return " ".join(word for _, word in sorted(index_to_word.items()))
 
 

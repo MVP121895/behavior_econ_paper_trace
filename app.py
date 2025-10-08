@@ -15,7 +15,7 @@ from utils import Article, default_from_date, fetch_articles
 st.set_page_config(page_title="行为经济学顶刊追踪", layout="wide")
 
 st.title("行为经济学顶刊追踪")
-st.markdown("使用 OpenAlex API 抓取经济学、金融学及行为经济学顶刊相关论文，并展示摘要与相关概念。")
+st.markdown("使用 Crossref API 抓取经济学、金融学及行为经济学顶刊相关论文。")
 
 
 def fetch_for_selected_journals(selected_journals: List[str], keyword: str, years: int, max_results: int, mailto: str | None) -> List[Article]:
@@ -73,8 +73,6 @@ if fetch_button:
                         "published_date": article.published_date,
                         "doi": article.doi,
                         "url": article.url,
-                        "abstract": article.abstract,
-                        "concepts": ", ".join(article.concepts),
                     }
                     for article in articles
                 ]
@@ -92,8 +90,6 @@ if fetch_button:
                     "published_date": st.column_config.DateColumn("发布日期"),
                     "doi": st.column_config.TextColumn("DOI"),
                     "url": st.column_config.LinkColumn("链接"),
-                    "abstract": st.column_config.TextColumn("摘要", width="large"),
-                    "concepts": st.column_config.TextColumn("相关概念"),
                 },
             )
 
@@ -102,6 +98,5 @@ if fetch_button:
 
 else:
     st.info("在侧边栏调整参数并点击“开始抓取”即可获取最新文章。")
-
 
 
